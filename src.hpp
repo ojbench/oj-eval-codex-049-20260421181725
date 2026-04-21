@@ -60,14 +60,12 @@ private:
         return min_s <= rr * rr;
     }
 
-    // Try to find a feasible velocity: desired first, then a couple sidesteps, else stop.
+    // Try to find a feasible velocity: desired first, then scaled and sidesteps, else stop.
     Vec find_feasible_velocity(const Vec &v_des) const {
-        // Priority rule: yield to lower-id robots if potential collision.
-        auto safe_against = [&](const Vec &v_try, bool check_all) -> bool {
+        auto safe_against_all = [&](const Vec &v_try) -> bool {
             int n = monitor->get_robot_number();
             for (int j = 0; j < n; ++j) {
                 if (j == id) continue;
-                if (!check_all && j >= id) continue; // yield only to lower ids
                 if (will_collide_with(j, v_try)) return false;
             }
             return true;
@@ -85,19 +83,29 @@ private:
         }
 
         // 1) Try desired velocity
-        if (safe_against(v_des, false)) return v_des;
+        if (safe_against_all(v_des)) return v_des;
+
+        // 1.5) Scale down speed progressively
+        for (double k = 0.9; k >= 0.2; k -= 0.2) {
+            Vec vc = v_des * k;
+            if (safe_against_all(vc)) return vc;
+        }
 
         // 2) Try a couple of sidesteps perpendicular to the line to target
         Vec dir = v_des.norm() > 1e-9 ? v_des.normalize() : Vec(0, 0);
         Vec perp(dir.y, -dir.x);
         double side_speed = v_max * 0.6;
-        Vec candidates[4] = {perp * side_speed, perp * (-side_speed), dir * (v_max * 0.4), Vec()};
+        Vec candidates[6] = {
+            perp * side_speed,
+            perp * (-side_speed),
+            dir * (v_max * 0.4),
+            dir.rotate(PI / 6) * (v_max * 0.5),
+            dir.rotate(-PI / 6) * (v_max * 0.5),
+            Vec()
+        };
         for (const auto &vc : candidates) {
-            if (safe_against(vc, false)) return vc;
+            if (safe_against_all(vc)) return vc;
         }
-
-        // 3) As a last resort, if blocked by lower-ids but free against all, try desired
-        if (safe_against(v_des, true)) return v_des;
 
         // 4) Stop
         return Vec();
@@ -137,4 +145,3 @@ public:
 
 
 #endif //PPCA_SRC_HPP
-
